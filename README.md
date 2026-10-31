@@ -93,33 +93,7 @@ erDiagram
     STATION ||--o{ INVENTORY_PROJECTION : "per window"
 ```
 
-### B.2 Core tables
-
-All tenant-scoped tables carry `customer_id` and are protected by Row-Level Security.
-
-| Table | Key columns | Notes |
-|---|---|---|
-| `customers` | `id`, `name`, `status` | Tenant root |
-| `users` | `id`, `customer_id`, `role` | Portal users; operators and admins are separate roles |
-| `trucks` | `id`, `customer_id`, `plate`, `battery_class` | Authorization check: truck must belong to the booking customer |
-| `stations` | `id`, `name`, `tz`, `bay_count`, `slot_count`, `status` | Static plus operational status |
-| `bays` | `id`, `station_id`, `status` (`OK`/`DOWN`/`MAINT`) | Robot health drives bay capacity |
-| `battery_slots` / `batteries` | `id`, `station_id`, `state`, `soc`, `charge_started_at`, `charge_eta` | **Internal only**; never exposed to customers |
-| `customer_station_share` | `customer_id`, `station_id`, `share_pct`, `effective_from` | Guaranteed share; sum of shares ≤ 100% minus walk-in reserve |
-| `capacity_window` | `station_id`, `window_start` (15 min), `bay_budget`, `battery_budget`, `committed`, `walkin_reserve`, `version` | **The contended row**; the unit of reservation |
-| `quota_usage` | `customer_id`, `station_id`, `window_start`, `guaranteed_limit`, `used_guaranteed`, `used_shared` | Fair-share accounting per window |
-| `bookings` | `id`, `public_ref`, `customer_id`, `truck_id`, `station_id`, `window_start`, `status`, `class` (`GUARANTEED`/`SHARED`), `idempotency_key`, `created_at` | Unique on `(customer_id, idempotency_key)` |
-| `booking_events` | `booking_id`, `type`, `at`, `actor`, `payload` | Append-only audit trail |
-| `queue_entries` | `id`, `station_id`, `booking_id` (nullable for walk-ins), `priority_class`, `arrived_at`, `status` | Operational queue |
-| `swaps` | `id`, `queue_entry_id`, `bay_id`, `battery_id`, `started_at`, `completed_at`, `outcome` | Our own **swap ledger**; feeds the projection |
-| `vendor_batches` | `station_id`, `vendor_batch_id`, `observed_at`, `received_at`, `status` (`APPLIED`/`DUPLICATE`/`STALE`/`QUARANTINED`) | `UNIQUE (station_id, vendor_batch_id)` for dedupe |
-| `battery_observations` | `batch_id`, `battery_id`, `state`, `soc`, `observed_at` | Raw observed view |
-| `inventory_projection` | `station_id`, `window_start`, `projected_charged`, `confidence`, `computed_at`, `based_on_batch_id` | Projected view with confidence |
-| `idempotency_keys` | `customer_id`, `key`, `request_hash`, `response`, `created_at` | Safe retries |
-| `outbox` | `id`, `topic`, `payload`, `created_at`, `published_at` | Transactional outbox |
-| `audit_log` | `actor`, `tenant_id`, `action`, `target`, `at` | Security and cross-tenant admin actions |
-
-### B.3 Booking flow
+### B.2 Booking flow
 
 ```mermaid
 stateDiagram-v2
@@ -186,7 +160,7 @@ Thresholds are configurable and are tuned from measured drift (see H).
 | **Stale** | ~90 min to ~4 h | Count only batteries confirmed charged at the snapshot minus our own swap ledger; give no credit for unconfirmed charge completions; larger haircut; require headroom ≥ 2 |
 | **Blind** | > ~4 h | No new bookings inside the live horizon; far-future bookings only via the reduced planning budget; alert operations |
 
-**Existing confirmed bookings are never cancelled because data went stale.** Staleness only throttles *new* admissions. We are never fully blind: our own swap ledger records every completed swap, so the projection can keep subtracting real consumption even without a vendor batch. The main uncertainty during an outage is charging progress and unrecorded swaps.
+
 
 ### C.4 Customer fair share (guaranteed, shared, opportunistic)
 
